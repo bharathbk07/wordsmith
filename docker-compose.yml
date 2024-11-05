@@ -6,15 +6,30 @@ services:
     image: postgres:10.0-alpine
     volumes:
       - ./db:/docker-entrypoint-initdb.d/
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   api:
     build: api
     image: dockersamples/wordsmith-api
     deploy:
       replicas: 5
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   web:
     build: web
     image: dockersamples/wordsmith-web
     ports:
-     - "8080:80"
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
