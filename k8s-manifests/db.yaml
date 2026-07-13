@@ -27,6 +27,8 @@ spec:
     metadata:
       labels:
         app: db
+      annotations:
+        oneagent.dynatrace.com/inject: "true"
     spec:
       containers:
         - name: db
