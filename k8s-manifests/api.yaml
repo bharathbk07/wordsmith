@@ -22,7 +22,7 @@ metadata:
   annotations:
     oneagent.dynatrace.com/inject: "true"
 spec:
-  replicas: 1
+  replicas: 5
   selector:
     matchLabels:
       app: api
@@ -43,3 +43,15 @@ spec:
           ports:
             - containerPort: 8080
               name: api
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10

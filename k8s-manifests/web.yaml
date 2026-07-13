@@ -20,6 +20,7 @@ metadata:
   labels:
     app: web
 spec:
+  replicas: 3
   selector:
     matchLabels:
       app: web
@@ -44,3 +45,15 @@ spec:
           ports:
             - containerPort: 80
               name: web
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10

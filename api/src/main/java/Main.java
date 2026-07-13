@@ -33,6 +33,14 @@ public class Main {
         Class.forName("org.postgresql.Driver");
 
         HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+        server.createContext("/health", exchange -> {
+            String response = "OK";
+            byte[] bytes = response.getBytes(Charsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
         server.createContext("/noun", handler(() -> randomWord("nouns", "/noun"), "nouns", "/noun"));
         server.createContext("/verb", handler(() -> randomWord("verbs", "/verb"), "verbs", "/verb"));
         server.createContext("/adjective", handler(() -> randomWord("adjectives", "/adjective"), "adjectives", "/adjective"));
@@ -108,7 +116,17 @@ public class Main {
             } catch (Exception e) {
                 span.recordException(e);
                 span.setStatus(StatusCode.ERROR, e.getMessage());
-                throw e;
+                try {
+                    String errResponse = "{\"error\":\"" + e.getMessage() + "\"}";
+                    byte[] errBytes = errResponse.getBytes(Charsets.UTF_8);
+                    exchange.getResponseHeaders().add("content-type", "application/json; charset=utf-8");
+                    exchange.sendResponseHeaders(500, errBytes.length);
+                    try (OutputStream os = exchange.getResponseBody()) {
+                        os.write(errBytes);
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
             } finally {
                 span.end();
             }

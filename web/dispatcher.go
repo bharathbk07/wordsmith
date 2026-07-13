@@ -130,20 +130,26 @@ func (f *forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("%s %d available ips: %v", r.URL.Path, len(addrs), addrs)
-	ip := addrs[rand.Intn(len(addrs))]
-	log.Printf("%s I choose %s", r.URL.Path, ip)
-	span.SetAttributes(attribute.String("upstream.host", ip))
 
-	url := fmt.Sprintf("http://%s:%d%s", ip, f.port, r.URL.Path)
-	log.Printf("%s Calling %s", r.URL.Path, url)
+	// Attempt connection to the resolved IPs in a randomized order to provide resiliency
+	perm := rand.Perm(len(addrs))
+	var lastErr error
+	for _, idx := range perm {
+		ip := addrs[idx]
+		span.SetAttributes(attribute.String("upstream.host", ip))
+		url := fmt.Sprintf("http://%s:%d%s", ip, f.port, r.URL.Path)
+		log.Printf("%s calling %s", r.URL.Path, url)
 
-	if err = copy(ctx, url, ip, w); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		log.Println("Error", err)
-		http.Error(w, err.Error(), 500)
-		return
+		if lastErr = copy(ctx, url, ip, w); lastErr == nil {
+			return
+		}
+		log.Printf("Error calling %s: %v. Retrying other IPs...", ip, lastErr)
 	}
+
+	span.RecordError(lastErr)
+	span.SetStatus(codes.Error, lastErr.Error())
+	log.Println("All upstream hosts failed. Last error:", lastErr)
+	http.Error(w, lastErr.Error(), 500)
 }
 
 func copy(ctx context.Context, url, ip string, w http.ResponseWriter) error {
