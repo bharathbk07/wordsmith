@@ -22,63 +22,108 @@ docker compose up --build
 
 Or you can pull pre-built images from Docker Hub using `docker compose pull`.
 
+---
 
-## Deploy using Kubernetes manifests
+## Deployment & Monitoring Guide
 
-You can deploy the same app to Kubernetes using the [Kustomize configuration](./kustomization.yaml). It will define all of the necessary Deployment and Service objects and a ConfigMap to provide the database schema.
+This guide details how to deploy the Wordsmith application to Kubernetes, configure Dynatrace monitoring (including OneAgent and OpenTelemetry), and set up Chaos Mesh to run reliability experiments.
 
-## Dynatrace instrumentation updates
+### 1. Deploying the Wordsmith Application
 
-This repository now includes a set of changes that make the sample application emit telemetry to a Dynatrace environment for traces and metrics ingestion:
+You can deploy the app to Kubernetes using the provided [Kustomize configuration](./kustomization.yaml). 
 
-- The Java API service now initializes OpenTelemetry and exports spans over OTLP/gRPC to the in-cluster Dynatrace telemetry ingest endpoint.
-- The Go web service now creates spans for incoming requests and upstream API calls and forwards them to the same collector path.
-- Kubernetes manifests were updated to inject the Dynatrace annotations and to pass the OTLP endpoint into the app containers.
-- The Dynatrace DynaKube configuration was adjusted for a local arm64 cluster by using the public ActiveGate image, reducing resource requests, and enabling the telemetry ingest services needed for OTLP.
-
-These changes were made to validate app-level distributed tracing and to allow the Wordsmith app to participate in Dynatrace observability even when the host-based OneAgent path is not fully compatible with the local environment.
-
-### Local verification notes
-
-To validate the setup in a local Kubernetes cluster:
-
+First, create a dedicated namespace (optional but recommended):
 ```shell
-kubectl apply -k .
+kubectl create namespace wordsmith
+```
+
+Apply the manifests (if deploying to the `wordsmith` namespace, pass the `-n` flag):
+```shell
+kubectl apply -k . -n wordsmith
+```
+
+Verify that the pods are running:
+```shell
 kubectl get pods -n wordsmith
-kubectl logs -n dynatrace deploy/eks-k8s-2026-07-13-agents-otel-collector-0
 ```
 
-If the application is running and the collector is reachable, requests through the web app should generate spans that are ingested by Dynatrace.
+You should see:
+- 1 pod for `db`
+- 1 pod for `web`
+- 5 replica pods for `api`
 
-Apply the manifest using `kubectl` while at the root of the project:
-
+To access the web interface, find the external IP / Port of the `web` service:
 ```shell
-kubectl apply -k .
+kubectl get svc -n wordsmith
 ```
+*Note: If you are running locally (e.g., Docker Desktop), browse to http://localhost:8080.*
 
-Once the pods are running, browse to http://localhost:8080 and you will see the site.
+---
 
-Docker Desktop includes Kubernetes and the [kubectl](https://kubernetes.io/docs/reference/kubectl/overview/) command line, so you can work directly with the cluster. Check the services are up, and you should see output like this:
+### 2. Setting Up Dynatrace Monitoring
 
-```text
-kubectl get svc
-NAME         TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
-db           ClusterIP      None             <none>        55555/TCP        2m
-kubernetes   ClusterIP      10.96.0.1        <none>        443/TCP          38d
-web          LoadBalancer   10.107.215.211   <pending>     8080:30220/TCP   2m
-words        ClusterIP      None             <none>        55555/TCP        2m
+Using the **Dynatrace OneAgent** alongside OpenTelemetry is highly recommended, especially when testing with Chaos Mesh.
+
+#### Why Use Dynatrace OneAgent for Chaos Mesh Testing?
+When Chaos Mesh injects a **Pod Fault** (such as pod failure or container kill) or a **Network Fault** (such as packet loss or latency):
+1. **OpenTelemetry Limitations**: Since OpenTelemetry instrumentation runs directly inside the application process:
+   - If the pod is killed, the application process terminates, and it cannot emit metrics or trace data.
+   - If a network fault is injected, the application's OTLP exporter may not be able to reach the telemetry collector (`telemetry-ingest.dynatrace.svc.cluster.local:4317`), causing metric loss.
+2. **OneAgent Advantages**: 
+   - OneAgent runs as a node-level DaemonSet (`cloudNativeFullStack`). Even if the pod is killed or network routes inside the pod are blocked, OneAgent continues to report container restarts, crash-loops, host resource utilization, and Kubernetes state events.
+   - OneAgent automatically injects instrumentation into containers annotated with `oneagent.dynatrace.com/inject: "true"` (already defined in `api.yaml` and `web.yaml`), capturing database calls, incoming requests, and dependencies with zero code modification.
+
+#### How to Download the DynaKube YAML
+1. Log in to your Dynatrace Environment.
+2. Navigate to **Manage** > **Kubernetes** or click **Deploy Dynatrace** > **Start Installation** > **Kubernetes**.
+3. Provide a name for your Kubernetes cluster (e.g., `k8s-cluster`).
+4. Click **Generate Token** to create the API and Data Ingest tokens.
+5. Under the installation commands, you will find a link to download the customized configuration YAML (`dynakube.yaml`) or a `curl` command to download it directly.
+6. Alternatively, customize the pre-configured [dynakube.yaml](./dynakube.yaml) file in this repository with your Dynatrace API URL (`apiUrl`) and Secret tokens.
+
+#### Deploying the Dynatrace Agent (Operator & DynaKube)
+1. Install the Dynatrace Operator via Helm:
+   ```shell
+   helm repo add dynatrace https://raw.githubusercontent.com/Dynatrace/dynatrace-operator/master/artifact/helm/repo
+   helm repo update
+   helm install dynatrace-operator dynatrace/dynatrace-operator -n dynatrace --create-namespace --atomic
+   ```
+2. Apply the `dynakube.yaml` configuration to start the OneAgent DaemonSet and ActiveGate:
+   ```shell
+   kubectl apply -f dynakube.yaml
+   ```
+3. Check the status of the Dynatrace monitoring pods:
+   ```shell
+   kubectl get pods -n dynatrace
+   ```
+
+---
+
+### 3. Deploying Chaos Mesh
+
+Chaos Mesh is a cloud-native Chaos Engineering platform that orchestrates chaos on Kubernetes environments.
+
+#### Deploying Chaos Mesh using Helm
+1. Add the Chaos Mesh Helm repository:
+   ```shell
+   helm repo add chaos-mesh https://charts.chaos-mesh.org
+   helm repo update
+   ```
+2. Deploy Chaos Mesh using the custom values file provided in this repository (which configures resources and adds OneAgent injection annotations to Chaos Mesh components so that Dynatrace monitors the chaos controller itself):
+   ```shell
+   helm install chaos-mesh chaos-mesh/chaos-mesh \
+     -n chaos-mesh \
+     --create-namespace \
+     -f k8s-manifests/chaos-mesh-values.yaml
+   ```
+3. Verify that the Chaos Mesh pods are running:
+   ```shell
+   kubectl get pods -n chaos-mesh
+   ```
+
+#### Accessing the Chaos Dashboard
+To access the Chaos Mesh dashboard locally, port-forward the dashboard service:
+```shell
+kubectl port-forward -n chaos-mesh svc/chaos-dashboard 2333:2333
 ```
-
-Check the pods are running and you should see one pod each for the database and web components and five pods for the words API:
-
-```text
-kubectl get pods
-NAME                   READY     STATUS    RESTARTS   AGE
-db-8678676c79-h2d99    1/1       Running   0          1m
-web-5d6bfbbd8b-6zbl8   1/1       Running   0          1m
-api-858f6678-6c8kk     1/1       Running   0          1m
-api-858f6678-7bqbv     1/1       Running   0          1m
-api-858f6678-fjdws     1/1       Running   0          1m
-api-858f6678-rrr8c     1/1       Running   0          1m
-api-858f6678-x9zqh     1/1       Running   0          1m
-```
+Now, open your browser and navigate to http://localhost:2333. You can use this dashboard or raw YAML manifests to define experiments (e.g., PodChaos, NetworkChaos).

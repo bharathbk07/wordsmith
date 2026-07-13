@@ -35,7 +35,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: wordsmith-api:local-20260713
+          image: wordsmith-api:local-20260714
           imagePullPolicy: Always
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT

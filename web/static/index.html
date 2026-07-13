@@ -41,6 +41,25 @@
 <div class="footer"><img src="images/homes.png" /></div>
 </body>
 
+<script>
+  window.__DYNATRACE_RUM_CONFIG__ = {
+    appId: "__DYNATRACE_RUM_APP_ID__",
+    scriptUrl: "__DYNATRACE_RUM_SCRIPT_URL__"
+  };
+</script>
+<script>
+  (function () {
+    var config = window.__DYNATRACE_RUM_CONFIG__ || {};
+    if (!config.scriptUrl || config.scriptUrl.indexOf('__') !== -1) {
+      return;
+    }
+    var script = document.createElement('script');
+    script.src = config.scriptUrl;
+    script.async = true;
+    script.setAttribute('data-dt-app-id', config.appId || 'wordsmith-web');
+    document.head.appendChild(script);
+  })();
+</script>
 <script src="angular.min.js"></script>
 <script src="app.js"></script>
 </html>

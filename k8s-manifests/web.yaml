@@ -32,11 +32,15 @@ spec:
     spec:
       containers:
         - name: web
-          image: wordsmith-web:local-20260713
+          image: wordsmith-web:local-20260714
           imagePullPolicy: Always
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: telemetry-ingest.dynatrace.svc.cluster.local:4317
+            - name: DYNATRACE_RUM_SCRIPT_URL
+              value: ""
+            - name: DYNATRACE_RUM_APP_ID
+              value: wordsmith-web
           ports:
             - containerPort: 80
               name: web

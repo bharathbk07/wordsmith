@@ -33,9 +33,9 @@ public class Main {
         Class.forName("org.postgresql.Driver");
 
         HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
-        server.createContext("/noun", handler(() -> randomWord("nouns"), "nouns"));
-        server.createContext("/verb", handler(() -> randomWord("verbs"), "verbs"));
-        server.createContext("/adjective", handler(() -> randomWord("adjectives"), "adjectives"));
+        server.createContext("/noun", handler(() -> randomWord("nouns", "/noun"), "nouns", "/noun"));
+        server.createContext("/verb", handler(() -> randomWord("verbs", "/verb"), "verbs", "/verb"));
+        server.createContext("/adjective", handler(() -> randomWord("adjectives", "/adjective"), "adjectives", "/adjective"));
         server.start();
     }
 
@@ -52,27 +52,44 @@ public class Main {
         return sdk.getTracer("wordsmith-api");
     }
 
-    private static String randomWord(String table) {
-        try (Connection connection = DriverManager.getConnection("jdbc:postgresql://db:5432/postgres", "postgres", "")) {
-            try (Statement statement = connection.createStatement()) {
-                try (ResultSet set = statement.executeQuery("SELECT word FROM " + table + " ORDER BY random() LIMIT 1")) {
-                    while (set.next()) {
-                        return set.getString(1);
+    private static String randomWord(String table, String route) {
+        Span dbSpan = tracer.spanBuilder("db.query").setSpanKind(SpanKind.CLIENT).startSpan();
+        dbSpan.setAttribute("db.system", "postgresql");
+        dbSpan.setAttribute("db.table", table);
+        dbSpan.setAttribute("http.route", route);
+
+        try (Scope scope = dbSpan.makeCurrent()) {
+            try (Connection connection = DriverManager.getConnection("jdbc:postgresql://db:5432/postgres", "postgres", "")) {
+                try (Statement statement = connection.createStatement()) {
+                    try (ResultSet set = statement.executeQuery("SELECT word FROM " + table + " ORDER BY random() LIMIT 1")) {
+                        while (set.next()) {
+                            return set.getString(1);
+                        }
                     }
                 }
             }
         } catch (SQLException e) {
+            dbSpan.recordException(e);
+            dbSpan.setStatus(StatusCode.ERROR, e.getMessage());
             e.printStackTrace();
+        } finally {
+            dbSpan.end();
         }
 
         throw new NoSuchElementException(table);
     }
 
-    private static HttpHandler handler(Supplier<String> word, String table) {
+    private static HttpHandler handler(Supplier<String> word, String table, String route) {
         return exchange -> {
-            Span span = tracer.spanBuilder("wordsmith.api.word").setSpanKind(SpanKind.SERVER).startSpan();
+            String spanName = route;
+            Span span = tracer.spanBuilder(spanName).setSpanKind(SpanKind.SERVER).startSpan();
             try (Scope scope = span.makeCurrent()) {
                 span.setAttribute("word.table", table);
+                span.setAttribute("http.method", exchange.getRequestMethod());
+                span.setAttribute("http.route", route);
+                span.setAttribute("http.scheme", "http");
+                span.setAttribute("http.target", exchange.getRequestURI().toString());
+
                 String response = "{\"word\":\"" + word.get() + "\"}";
                 byte[] bytes = response.getBytes(Charsets.UTF_8);
 
@@ -83,6 +100,7 @@ public class Main {
                 exchange.getResponseHeaders().add("pragma", "no-cache");
 
                 exchange.sendResponseHeaders(200, bytes.length);
+                span.setAttribute("http.status_code", 200);
 
                 try (OutputStream os = exchange.getResponseBody()) {
                     os.write(bytes);

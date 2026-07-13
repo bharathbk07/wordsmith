@@ -1,0 +1,34 @@
+ # To access dashboard locally: kubectl port-forward -n chaos-mesh svc/chaos-dashboard 2333:2333
+clusterScoped: true
+rbac:
+  create: true
+controllerManager:
+  replicaCount: 1
+  podAnnotations:
+    oneagent.dynatrace.com/inject: "true"
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 25m
+      memory: 256Mi
+chaosDaemon:
+  podAnnotations:
+    oneagent.dynatrace.com/inject: "true"
+  imagePullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 25m
+      memory: 256Mi
+dashboard:
+  podAnnotations:
+    oneagent.dynatrace.com/inject: "true"
+  service:
+    type: NodePort
+    nodePort: 32333
+  replicaCount: 1
+  securityMode: false
+  resources:
+    requests:
+      cpu: 25m
+      memory: 256Mi

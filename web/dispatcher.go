@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -34,7 +35,13 @@ func main() {
 	}
 	fwd := &forwarder{apiHost, 8080}
 	http.Handle("/words/", http.StripPrefix("/words", fwd))
-	http.Handle("/", http.FileServer(http.Dir("static")))
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.FileServer(http.Dir("static")).ServeHTTP(w, r)
+			return
+		}
+		serveIndex(w, r)
+	})
 
 	fmt.Println("Listening on port 80")
 	http.ListenAndServe(":80", nil)
@@ -76,11 +83,42 @@ type forwarder struct {
 	port int
 }
 
+func serveIndex(w http.ResponseWriter, r *http.Request) {
+	content, err := os.ReadFile("static/index.html")
+	if err != nil {
+		log.Printf("failed to read index template: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rumScript := os.Getenv("DYNATRACE_RUM_SCRIPT_URL")
+	rumAppID := os.Getenv("DYNATRACE_RUM_APP_ID")
+	if rumAppID == "" {
+		rumAppID = "wordsmith-web"
+	}
+
+	body := string(content)
+	body = strings.ReplaceAll(body, "__DYNATRACE_RUM_APP_ID__", rumAppID)
+	body = strings.ReplaceAll(body, "__DYNATRACE_RUM_SCRIPT_URL__", rumScript)
+	w.Header().Set("content-type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(body))
+}
+
 func (f *forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, span := tracer.Start(r.Context(), "wordsmith.web.forward")
+	route := strings.TrimPrefix(r.URL.Path, "/")
+	if route == "" {
+		route = "root"
+	}
+	spanName := r.URL.Path
+	ctx, span := tracer.Start(r.Context(), spanName)
 	defer span.End()
 
-	span.SetAttributes(attribute.String("http.route", r.URL.Path))
+	span.SetAttributes(
+		attribute.String("http.method", r.Method),
+		attribute.String("http.route", r.URL.Path),
+		attribute.String("http.target", r.URL.RequestURI()),
+		attribute.String("http.scheme", "http"),
+	)
 
 	addrs, err := net.LookupHost(f.host)
 	if err != nil {
