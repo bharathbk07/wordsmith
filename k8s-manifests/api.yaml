@@ -19,8 +19,10 @@ metadata:
   name: api
   labels:
     app: api
+  annotations:
+    oneagent.dynatrace.com/inject: "true"
 spec:
-  replicas: 5
+  replicas: 1
   selector:
     matchLabels:
       app: api
@@ -28,10 +30,16 @@ spec:
     metadata:
       labels:
         app: api
+      annotations:
+        oneagent.dynatrace.com/inject: "true"
     spec:
       containers:
         - name: api
-          image: dockersamples/wordsmith-api
+          image: wordsmith-api:local-20260713
+          imagePullPolicy: Always
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: telemetry-ingest.dynatrace.svc.cluster.local:4317
           ports:
             - containerPort: 8080
               name: api

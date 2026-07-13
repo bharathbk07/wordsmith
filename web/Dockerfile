@@ -4,10 +4,11 @@ FROM --platform=$BUILDPLATFORM golang:alpine as builder
 WORKDIR /usr/local/app
 ARG TARGETARCH
 
-COPY dispatcher.go .
+COPY go.mod ./
+COPY dispatcher.go ./
 
 # build for the target arch not the build platform host arch
-RUN GOOS=linux GOARCH=$TARGETARCH go build dispatcher.go
+RUN GOOS=linux GOARCH=$TARGETARCH go mod tidy && GOOS=linux GOARCH=$TARGETARCH go build -o dispatcher .
 
 # RUN
 # defaults to using the target arch image

@@ -27,6 +27,29 @@ Or you can pull pre-built images from Docker Hub using `docker compose pull`.
 
 You can deploy the same app to Kubernetes using the [Kustomize configuration](./kustomization.yaml). It will define all of the necessary Deployment and Service objects and a ConfigMap to provide the database schema.
 
+## Dynatrace instrumentation updates
+
+This repository now includes a set of changes that make the sample application emit telemetry to a Dynatrace environment for traces and metrics ingestion:
+
+- The Java API service now initializes OpenTelemetry and exports spans over OTLP/gRPC to the in-cluster Dynatrace telemetry ingest endpoint.
+- The Go web service now creates spans for incoming requests and upstream API calls and forwards them to the same collector path.
+- Kubernetes manifests were updated to inject the Dynatrace annotations and to pass the OTLP endpoint into the app containers.
+- The Dynatrace DynaKube configuration was adjusted for a local arm64 cluster by using the public ActiveGate image, reducing resource requests, and enabling the telemetry ingest services needed for OTLP.
+
+These changes were made to validate app-level distributed tracing and to allow the Wordsmith app to participate in Dynatrace observability even when the host-based OneAgent path is not fully compatible with the local environment.
+
+### Local verification notes
+
+To validate the setup in a local Kubernetes cluster:
+
+```shell
+kubectl apply -k .
+kubectl get pods -n wordsmith
+kubectl logs -n dynatrace deploy/eks-k8s-2026-07-13-agents-otel-collector-0
+```
+
+If the application is running and the collector is reachable, requests through the web app should generate spans that are ingested by Dynatrace.
+
 Apply the manifest using `kubectl` while at the root of the project:
 
 ```shell
